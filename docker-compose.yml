@@ -13,11 +13,7 @@ services:
     networks:
       - bot_network
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'pg_isready -U ${POSTGRES_USER:-remnawave_user} -d ${POSTGRES_DB:-remnawave_bot}',
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-remnawave_user} -d ${POSTGRES_DB:-remnawave_bot}"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -38,6 +34,20 @@ services:
       timeout: 10s
       retries: 3
 
+  cabinet-frontend:
+      # Мы используем имя образа, которое получилось при сборке в Шаге 3
+      image: cabinettgbot-cabinet-frontend:latest
+      container_name: cabinet_frontend
+      restart: unless-stopped
+      networks:
+        - bot_network
+      healthcheck:
+        test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/ || exit 1"]
+        interval: 30s
+        timeout: 3s
+        retries: 3
+        start_period: 5s
+
   bot:
     build: .
     container_name: remnawave_bot
@@ -50,7 +60,6 @@ services:
     env_file:
       - .env
     environment:
-      FORCE_COLOR: '1'
       DOCKER_ENV: 'true'
       DATABASE_MODE: 'auto'
       POSTGRES_HOST: 'postgres'
@@ -58,26 +67,19 @@ services:
       POSTGRES_DB: '${POSTGRES_DB:-remnawave_bot}'
       POSTGRES_USER: '${POSTGRES_USER:-remnawave_user}'
       POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-secure_password_123}'
-
       REDIS_URL: 'redis://redis:6379/0'
-
       TZ: 'Europe/Moscow'
       LOCALES_PATH: '${LOCALES_PATH:-/app/locales}'
     volumes:
-      # Логи
       - ./logs:/app/logs:rw
-      # Данные приложения (для SQLite в случае переключения)
       - ./data:/app/data:rw
       - ./locales:/app/locales:rw
-      # Timezone
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
-      # Загруженные медиафайлы (изображения/видео для новостей)
-      - ./uploads:/app/uploads:rw
-      # Логотип для сообщений
       - ./vpn_logo.png:/app/vpn_logo.png:ro
-    ports:
-      - '${WEB_API_PORT:-8080}:8080'
+    # Порты наружу не открываем напрямую, за это отвечает Caddy
+    expose:
+      - "8080"
     networks:
       - bot_network
     healthcheck:
@@ -91,14 +93,31 @@ services:
       retries: 3
       start_period: 30s
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: remnawave_caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+    networks:
+      - bot_network
+
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
+  caddy_data:
+  caddy_config:
 
 networks:
   bot_network:
+    name: remnawave_bot_network
     driver: bridge
     ipam:
       config:
